@@ -150,6 +150,9 @@ public struct ScanAnalyzer: Sendable {
                 artifacts.append((node, kind))
                 childProject = .none
             }
+            // Packages inside node_modules (or a tool's global install) have their own
+            // node_modules folders that belong to them, not to a project.
+            if node.name == "node_modules" { childProject = .none }
             if node === homeNode { childProject = .eligible }
             if node.isPackage { childProject = .none }
 

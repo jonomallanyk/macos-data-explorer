@@ -22,6 +22,8 @@ final class AnalyzerTests: XCTestCase {
         try box.file("Code/rusty/Cargo.toml", bytes: 30)
         try box.file("Code/rusty/target/debug/app", bytes: 5_500_000)
         try box.file("Code/notrust/target/thing.bin", bytes: 5_500_000)
+        try box.file("tools/node/lib/node_modules/npm/package.json", bytes: 30)
+        try box.file("tools/node/lib/node_modules/npm/node_modules/dep/index.js", bytes: 5_200_000)
         try box.file("Downloads/Tool.dmg", bytes: 2_500_000)
         try box.file("Downloads/Notes.txt", bytes: 1_200_000)
         try box.file("Documents/movie.mov", bytes: 4_000_000)
@@ -66,6 +68,7 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertTrue(artifactPaths.contains(box.root + "/Code/web/node_modules"))
         XCTAssertTrue(artifactPaths.contains(box.root + "/Code/rusty/target"))
         XCTAssertFalse(artifactPaths.contains(box.root + "/Code/notrust/target"))
+        XCTAssertFalse(artifactPaths.contains { $0.contains("/tools/node/") }, "A global Node install isn't a project")
 
         let installers = try XCTUnwrap(byID["downloaded-installers"])
         XCTAssertEqual(installers.items.map(\.name), ["Tool.dmg"])
