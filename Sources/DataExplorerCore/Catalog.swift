@@ -819,6 +819,37 @@ enum Catalog {
             ifDeleted: "You could lose personal data or break syncing."
         ),
         KnownLocation(
+            id: "personal-app-data",
+            title: "Notes, Reminders, Voice Memos & Books",
+            paths: [
+                "~/Library/Group Containers/group.com.apple.notes",
+                "~/Library/Group Containers/group.com.apple.VoiceMemos.shared",
+                "~/Library/Group Containers/group.com.apple.reminders",
+                "~/Library/Group Containers/group.com.apple.calendar",
+                "~/Library/Group Containers/group.com.apple.freeform",
+                "~/Library/Containers/com.apple.Notes",
+                "~/Library/Containers/com.apple.VoiceMemos",
+                "~/Library/Containers/com.apple.BKAgentService",
+                "~/Library/Containers/com.apple.iBooksX",
+            ],
+            category: .appData,
+            safety: .protected,
+            cleanup: .manual("Delete notes, memos, reminders or books from inside their apps."),
+            systemData: true,
+            whatItIs: "Your notes, voice memos, reminders, calendars, Freeform boards and the books and PDFs you've added to Books.",
+            ifDeleted: "Anything not synced to iCloud would be lost."
+        ),
+        KnownLocation(
+            id: "security-keys",
+            title: "SSH and GPG keys",
+            paths: ["~/.ssh", "~/.gnupg"],
+            category: .appData,
+            safety: .protected,
+            cleanup: .individually,
+            whatItIs: "Your private keys for logging in to servers and services (SSH) and for signing or encrypting (GPG). They're tiny.",
+            ifDeleted: "You'd lose access to servers, repositories and encrypted files that use these keys."
+        ),
+        KnownLocation(
             id: "ios-backups",
             title: "iPhone & iPad backups",
             paths: ["~/Library/Application Support/MobileSync/Backup"],

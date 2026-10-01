@@ -54,7 +54,10 @@ public struct SafetyPolicy: Sendable {
             "/Library/Keychains", "/Library/Apple", "/Library/Extensions", "/Library/SystemExtensions",
             "/Library/Security", "/Library/LaunchDaemons", "/Library/LaunchAgents", "/Library/PrivilegedHelperTools",
             "/Library/Preferences", "/Library/Frameworks", "/Library/Filesystems",
-            home + "/Library/Keychains",
+            "/Library/OpenDirectory", "/Library/DirectoryServices", "/Library/Managed Preferences",
+            "/Library/DriverExtensions", "/Library/StagedExtensions", "/Library/KernelCollections",
+            "/Library/Receipts", "/Library/SystemMigration", "/Library/Application Support/com.apple.TCC",
+            home + "/Library/Keychains", home + "/.ssh", home + "/.gnupg",
         ]
     }
 
@@ -86,7 +89,11 @@ public struct SafetyPolicy: Sendable {
             return .blocked("This is cloud storage: deleting it here deletes it from the cloud and from your other devices. To free space without deleting, right-click it in Finder and choose Remove Download.")
         }
 
-        for name in names.dropLast() {
+        for (index, name) in names.dropLast().enumerated() {
+            // App containers are named after bundle IDs like "com.utmapp.UTM"; they aren't packages.
+            if index >= 2, names[index - 2] == "Library", FileNode.containerFolderNames.contains(names[index - 1]) {
+                continue
+            }
             let ext = (name as NSString).pathExtension.lowercased()
             if FileTypeHints.packageExtensions.contains(ext) {
                 return .blocked("This is part of \"\(name)\". Pieces of it can't be deleted on their own; delete the whole item instead, or manage it from its app.")
@@ -108,6 +115,9 @@ public struct SafetyPolicy: Sendable {
             return kind == .item ? .allowed : .blocked("Choose individual items inside this folder instead.")
         }
         let location = match.location
+        if let ancestor = match.restrictingAncestor {
+            return .blocked(blockedReason(for: ancestor))
+        }
 
         if match.isExact {
             if location.safety == .protected {
@@ -140,6 +150,43 @@ public struct SafetyPolicy: Sendable {
             return .blocked("This is part of \(location.title), which shouldn't be edited directly. \(steps)")
         }
         return .allowed
+    }
+
+    static let containsLibraryReason = "This folder contains a photo, music or video library. Open the library in its app to remove what you don't need, or move the library somewhere else first."
+
+    /// Checks a scanned item, which also knows whether a folder holds a media library somewhere inside.
+    public func check(_ node: FileNode, in tree: FileTree) -> Verdict {
+        check(node, at: tree.path(of: node))
+    }
+
+    public func check(_ node: FileNode, at path: String) -> Verdict {
+        if node.isDirectory, node.containsMediaLibrary,
+           !FileTypeHints.mediaLibraryExtensions.contains(node.pathExtension) {
+            return .blocked(Self.containsLibraryReason)
+        }
+        return check(path, kind: .item)
+    }
+
+    /// Whether deleting this folder needs a look inside it first (for media libraries). Folders
+    /// meant to be emptied, like caches, don't.
+    func shouldLookInside(_ path: String) -> Bool {
+        guard let match = knowledge.match(path: path) else { return true }
+        return match.location.cleanup != .trashContents
+    }
+
+    /// Looks for Photos, Music, TV or similar libraries anywhere inside a folder on disk.
+    static func containsMediaLibrary(atPath path: String) -> Bool {
+        let url = URL(fileURLWithPath: path)
+        if FileTypeHints.mediaLibraryExtensions.contains(url.pathExtension.lowercased()) { return true }
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsPackageDescendants]
+        ) else { return false }
+        for case let item as URL in enumerator where FileTypeHints.mediaLibraryExtensions.contains(item.pathExtension.lowercased()) {
+            return true
+        }
+        return false
     }
 
     /// Libraries and other pieces of installed software: removing one breaks the whole program.

@@ -146,10 +146,11 @@ final class PatternTrie: @unchecked Sendable {
 
     let root = Node()
 
+    /// Names are compared case-insensitively, like the Mac's file system.
     func insert(_ components: [String], index: Int) {
         var node = root
         var literalCount = 0
-        for component in components {
+        for component in components.map({ $0.lowercased() }) {
             if component.contains("*") {
                 if let existing = node.globs.first(where: { $0.pattern == component }) {
                     node = existing.node
@@ -174,9 +175,10 @@ final class PatternTrie: @unchecked Sendable {
 
     func advance(_ states: [Node], _ name: String) -> [Node] {
         var next: [Node] = []
+        let key = name.lowercased()
         for state in states {
-            if let literal = state.literals[name] { next.append(literal) }
-            for glob in state.globs where Wildcard.matches(glob.pattern, name) {
+            if let literal = state.literals[key] { next.append(literal) }
+            for glob in state.globs where Wildcard.matches(glob.pattern, key) {
                 next.append(glob.node)
             }
         }
@@ -227,6 +229,9 @@ public struct KnowledgeBase: Sendable {
         public let depth: Int
         public let isExact: Bool
         public let captures: [String]
+        /// A shallower match that must not be deleted from (protected, or cleaned up elsewhere).
+        /// Anything inside it inherits that, even when a deeper entry matches too.
+        public let restrictingAncestor: KnownLocation?
     }
 
     public init(home: String, locations: [KnownLocation]) {
@@ -273,17 +278,36 @@ public struct KnowledgeBase: Sendable {
         let comps = Self.components(of: path)
         var states = [trie.root]
         var best: (terminal: PatternTrie.Terminal, depth: Int)?
-        if let terminal = PatternTrie.best(in: states) { best = (terminal, 0) }
+        var restricting: (terminal: PatternTrie.Terminal, depth: Int)?
+        func consider(_ terminal: PatternTrie.Terminal, depth: Int) {
+            best = (terminal, depth)
+            let location = locations[terminal.index]
+            if location.safety == .protected || location.manualSteps != nil {
+                restricting = (terminal, depth)
+            }
+        }
+        if let terminal = PatternTrie.best(in: states) { consider(terminal, depth: 0) }
         for (offset, name) in comps.enumerated() {
             states = trie.advance(states, name)
             if states.isEmpty { break }
-            if let terminal = PatternTrie.best(in: states) { best = (terminal, offset + 1) }
+            if let terminal = PatternTrie.best(in: states) { consider(terminal, depth: offset + 1) }
         }
         guard let best else { return nil }
-        return makeMatch(best.terminal, depth: best.depth, components: comps)
+        // Generic wildcard entries (like "any app's Cache folder") don't override a protected
+        // folder above them. Specific entries were placed deliberately, so they do.
+        var ancestor: KnownLocation?
+        if let restricting, restricting.depth < best.depth, best.terminal.pattern.contains(where: { $0.contains("*") }) {
+            ancestor = locations[restricting.terminal.index]
+        }
+        return makeMatch(best.terminal, depth: best.depth, components: comps, restrictingAncestor: ancestor)
     }
 
-    func makeMatch(_ terminal: PatternTrie.Terminal, depth: Int, components: [String]) -> Match {
+    func makeMatch(
+        _ terminal: PatternTrie.Terminal,
+        depth: Int,
+        components: [String],
+        restrictingAncestor: KnownLocation? = nil
+    ) -> Match {
         var captures: [String] = []
         for (offset, part) in terminal.pattern.enumerated() where part.contains("*") && offset < components.count {
             captures.append(components[offset])
@@ -293,7 +317,8 @@ public struct KnowledgeBase: Sendable {
             index: terminal.index,
             depth: depth,
             isExact: depth == components.count,
-            captures: captures
+            captures: captures,
+            restrictingAncestor: restrictingAncestor
         )
     }
 
@@ -318,6 +343,8 @@ public struct KnowledgeBase: Sendable {
         }
 
         let location = match.location
+        // Inside something protected, a deeper entry (like a generic cache folder) doesn't make it deletable.
+        let inheritedProtection = match.restrictingAncestor?.safety == .protected && location.manualSteps == nil
         if match.isExact {
             return Explanation(
                 location: location,
@@ -326,7 +353,7 @@ public struct KnowledgeBase: Sendable {
                 headline: location.title,
                 whatItIs: location.whatItIs,
                 ifDeleted: location.ifDeleted,
-                safety: location.safety,
+                safety: inheritedProtection ? .protected : location.safety,
                 category: location.category,
                 countsAsSystemData: location.countsAsSystemData
             )
@@ -341,7 +368,7 @@ public struct KnowledgeBase: Sendable {
                 headline: hint.title,
                 whatItIs: hint.description,
                 ifDeleted: hint.safety == .protected ? location.ifDeleted : hint.ifDeleted,
-                safety: hint.safety,
+                safety: inheritedProtection ? .protected : hint.safety,
                 category: location.category,
                 countsAsSystemData: location.countsAsSystemData
             )
@@ -354,7 +381,7 @@ public struct KnowledgeBase: Sendable {
             headline: "Inside \(location.title)",
             whatItIs: location.insideNote ?? location.whatItIs,
             ifDeleted: location.ifDeleted,
-            safety: location.insideSafety ?? location.safety,
+            safety: inheritedProtection ? .protected : (location.insideSafety ?? location.safety),
             category: location.category,
             countsAsSystemData: location.countsAsSystemData
         )

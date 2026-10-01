@@ -227,10 +227,12 @@ public enum DiskScanner {
                 deferredIDs.insert(ObjectIdentifier(item.node))
                 let addedSize = item.node.size - sizesBefore[index]
                 let addedFiles = item.node.fileCount
+                let hasLibrary = item.node.containsMediaLibrary
                 var ancestor = item.node.parent
                 while let node = ancestor {
                     node.size += addedSize
                     node.fileCount += addedFiles
+                    if hasLibrary { node.containsMediaLibrary = true }
                     ancestor = node.parent
                 }
             }
@@ -302,6 +304,7 @@ public enum DiskScanner {
             if let parent = stack.last?.node {
                 parent.size += finished.size
                 parent.fileCount += finished.fileCount
+                if finished.containsMediaLibrary { parent.containsMediaLibrary = true }
             }
         }
 
@@ -358,6 +361,9 @@ public enum DiskScanner {
                 )
                 node.size = Int64(st.st_blocks) * 512
                 node.modified = modificationTime(st)
+                if FileTypeHints.mediaLibraryExtensions.contains(node.pathExtension) {
+                    node.containsMediaLibrary = true
+                }
                 if let parent {
                     parent.children.append(node)
                 } else {

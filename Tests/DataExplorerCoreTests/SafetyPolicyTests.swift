@@ -118,5 +118,30 @@ final class SafetyPolicyTests: XCTestCase {
     func testCaseInsensitiveProtection() {
         assertBlocked("/system/Library/Kernels/kernel")
         assertBlocked("/PRIVATE/var/vm/sleepimage")
+        // The Mac's file system ignores case, so the catalogue must too.
+        assertBlocked(home + "/Library/messages/chat.db")
+        assertBlocked(home + "/library/Safari/History.db")
+        assertBlocked("/users/someone/Documents/file.txt")
+    }
+
+    func testPersonalDataIsProtected() {
+        assertBlocked(home + "/Library/Group Containers/group.com.apple.notes")
+        assertBlocked(home + "/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite")
+        assertBlocked(home + "/Library/Containers/com.apple.BKAgentService")
+        assertBlocked(home + "/.ssh/id_ed25519")
+        assertBlocked("/Library/OpenDirectory/configurations")
+    }
+
+    func testGenericCachePatternsDontReachIntoProtectedFolders() {
+        assertBlocked(home + "/Library/Application Support/AddressBook/Cache", .contents)
+        assertBlocked(home + "/Library/Application Support/FileProvider/Cache/x")
+        assertBlocked(home + "/Library/Group Containers/group.com.apple.notes/Library/Caches", .contents)
+        // Ordinary apps' caches are still fine.
+        assertAllowed(home + "/Library/Application Support/Slack/Cache", .contents)
+    }
+
+    func testBundleIDFoldersAreNotPackages() {
+        assertAllowed(home + "/Library/Containers/com.utmapp.UTM/Data/Documents", .contents)
+        assertAllowed(home + "/Library/Containers/com.apple.iWork.Pages/Data/Library/Caches", .contents)
     }
 }

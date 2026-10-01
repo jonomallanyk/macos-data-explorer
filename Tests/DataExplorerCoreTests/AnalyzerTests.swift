@@ -112,6 +112,57 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertEqual(outcome.bytesHandled, 3_000_000 + 4_000_000 + 1)
     }
 
+    func testFoldersContainingPhotoLibrariesAreProtected() throws {
+        let box = try Sandbox()
+        try box.file("Desktop/Old Mac/Photos Library.photoslibrary/database/Photos.sqlite", bytes: 1_200_000)
+        try box.file("Desktop/Old Mac/notes.txt", bytes: 10)
+        try box.file("Desktop/Other/file.bin", bytes: 1_200_000)
+        let knowledge = KnowledgeBase.standard(home: box.root)
+        let policy = makePolicy(knowledge)
+        let tree = try DiskScanner.scan(.folder(box.root)).tree
+
+        let oldMac = try XCTUnwrap(tree.node(atPath: box.root + "/Desktop/Old Mac"))
+        XCTAssertTrue(oldMac.containsMediaLibrary)
+        XCTAssertFalse(policy.check(oldMac, in: tree).isAllowed)
+        let other = try XCTUnwrap(tree.node(atPath: box.root + "/Desktop/Other"))
+        XCTAssertTrue(policy.check(other, in: tree).isAllowed)
+
+        // The cleanup engine looks on disk too, even with only a path to go on.
+        let engine = CleanupEngine(policy: policy)
+        let target = CleanupTarget(path: box.root + "/Desktop/Old Mac", kind: .item, title: "Old Mac", size: 1, safety: .review)
+        let outcome = engine.run([target], mode: .deleteImmediately)
+        XCTAssertEqual(outcome.failures.map(\.path), [target.path])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: target.path))
+    }
+
+    func testSymlinkedPathsAreRefused() throws {
+        let box = try Sandbox()
+        try box.file("real/folder/file.bin", bytes: 100)
+        try FileManager.default.createSymbolicLink(atPath: box.root + "/shortcut", withDestinationPath: box.root + "/real")
+        let knowledge = KnowledgeBase.standard(home: box.root)
+        let engine = CleanupEngine(policy: makePolicy(knowledge))
+        let viaLink = CleanupTarget(path: box.root + "/shortcut/folder", kind: .item, title: "folder", size: 1, safety: .review)
+        let outcome = engine.run([viaLink], mode: .deleteImmediately)
+        XCTAssertEqual(outcome.failures.count, 1)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: box.root + "/real/folder/file.bin"))
+    }
+
+    func testNestedSuggestionsAreNotCountedTwice() throws {
+        let box = try Sandbox()
+        try box.file(".cache/lm-studio/models/model.gguf", bytes: 3_000_000)
+        try box.file(".cache/other/blob", bytes: 1_500_000)
+        let knowledge = KnowledgeBase.standard(home: box.root)
+        let analyzer = ScanAnalyzer(knowledge: knowledge, policy: makePolicy(knowledge))
+        let report = analyzer.analyze(try DiskScanner.scan(.folder(box.root)))
+        let byID = Dictionary(uniqueKeysWithValues: report.findings.map { ($0.id, $0) })
+        let models = try XCTUnwrap(byID["lm-studio"])
+        let cache = try XCTUnwrap(byID["dot-cache"])
+        XCTAssertGreaterThanOrEqual(models.totalSize, 3_000_000)
+        XCTAssertLessThan(cache.totalSize, 3_000_000, "The models are listed separately")
+        // Emptying the whole cache folder still removes everything in it.
+        XCTAssertGreaterThan(cache.wholeTargets.first?.size ?? 0, 4_000_000)
+    }
+
     func testExecutablesAreTreatedAsPartsOfPrograms() throws {
         let box = try Sandbox()
         let tool = try box.file("tools/bin/mytool", bytes: 10)

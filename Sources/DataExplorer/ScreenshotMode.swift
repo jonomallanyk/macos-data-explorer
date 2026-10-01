@@ -48,7 +48,7 @@ enum ScreenshotMode {
         NSApp.appearance = nil
 
         model.selection = .suggestions
-        model.focusedFindingID = report.findings.first(where: { $0.isActionable })?.id
+        model.focusedFindingID = report.findings.first?.id
         await pause(2.5)
         capture(window, "05-suggestions", in: folder)
 

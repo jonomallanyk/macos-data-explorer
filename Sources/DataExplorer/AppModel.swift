@@ -311,12 +311,12 @@ final class AppModel {
     }
 
     func verdict(for node: FileNode) -> SafetyPolicy.Verdict {
-        policy.check(path(of: node), kind: .item)
+        policy.check(node, at: path(of: node))
     }
 
     func target(for node: FileNode) -> CleanupTarget? {
         let path = path(of: node)
-        guard policy.check(path, kind: .item).isAllowed else { return nil }
+        guard policy.check(node, at: path).isAllowed else { return nil }
         let explanation = knowledge.explain(path: path, isDirectory: node.isDirectory)
         return CleanupTarget(path: path, kind: .item, title: node.name, size: node.size, safety: explanation.safety, isFolder: node.isDirectory)
     }

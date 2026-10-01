@@ -57,6 +57,11 @@ public final class FileNode: Identifiable, @unchecked Sendable {
     public internal(set) var markers: Markers = []
     /// True when the folder couldn't be read (usually missing permission).
     public internal(set) var isUnreadable = false
+    /// True when this is, or contains, a Photos, Music or similar library.
+    public internal(set) var containsMediaLibrary = false
+
+    /// Folders whose children are named after bundle IDs (which can look like file extensions).
+    static let containerFolderNames: Set<String> = ["Containers", "Group Containers", "Application Scripts"]
 
     init(name: String, kind: Kind, parent: FileNode?) {
         self.name = name
@@ -75,7 +80,9 @@ public final class FileNode: Identifiable, @unchecked Sendable {
 
     /// Folders that Finder shows as a single item, such as apps and photo libraries.
     public var isPackage: Bool {
-        isDirectory && FileTypeHints.packageExtensions.contains(pathExtension)
+        guard isDirectory, FileTypeHints.packageExtensions.contains(pathExtension) else { return false }
+        if let parentName = parent?.name, Self.containerFolderNames.contains(parentName) { return false }
+        return true
     }
 
     /// Bytes in this node that aren't accounted for by its listed children.

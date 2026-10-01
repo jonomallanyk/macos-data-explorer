@@ -96,6 +96,10 @@ public struct CleanupEngine: Sendable {
                 outcome.failures.append(.init(path: target.path, reason: reason))
                 continue
             }
+            if let reason = Self.fileSystemProblem(with: target, policy: policy) {
+                outcome.failures.append(.init(path: target.path, reason: reason))
+                continue
+            }
 
             switch target.kind {
             case .item:
@@ -161,6 +165,37 @@ public struct CleanupEngine: Sendable {
         } catch let error as CocoaError where error.code == .fileNoSuchFile {
             // Already gone, which is what we wanted.
         }
+    }
+
+    /// Checks the real file system, which the path-based policy can't see: shortcuts (symbolic
+    /// links) that would make a path point somewhere else, and media libraries inside folders.
+    static func fileSystemProblem(with target: CleanupTarget, policy: SafetyPolicy) -> String? {
+        let path = target.path
+        let parent = (path as NSString).deletingLastPathComponent
+        if let resolved = realpath(parent, nil) {
+            let real = String(cString: resolved)
+            free(resolved)
+            let matches = real.lowercased() == parent.lowercased()
+                || real.lowercased() == (FileTree.dataVolumePath + parent).lowercased()
+            if !matches {
+                return "This path goes through a shortcut (symbolic link) to \(real), so Data Explorer won't delete it. Find the item at its real location instead."
+            }
+        }
+
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return nil }
+        let type = UInt32(info.st_mode) & 0o170000
+        let isDirectory = type == 0o040000
+        let isSymlink = type == 0o120000
+        if target.kind == .contents && !isDirectory {
+            return isSymlink
+                ? "This is a shortcut (symbolic link) to a folder elsewhere, so Data Explorer won't empty it."
+                : "This isn't a folder."
+        }
+        if target.kind == .item, isDirectory, policy.shouldLookInside(path), SafetyPolicy.containsMediaLibrary(atPath: path) {
+            return SafetyPolicy.containsLibraryReason
+        }
+        return nil
     }
 
     static func describe(_ error: Error) -> String {

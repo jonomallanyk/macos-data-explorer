@@ -102,6 +102,9 @@ public struct ScanAnalyzer: Sendable {
         var totals: [StorageCategory: Int64] = [:]
         var systemData: Int64 = 0
         var matches: [Int: [FileNode]] = [:]
+        // Bytes inside a suggested folder that belong to another, more specific suggestion, so
+        // the same bytes aren't counted twice (e.g. simulator runtimes inside system assets).
+        var nestedSize: [ObjectIdentifier: Int64] = [:]
         var artifacts: [(node: FileNode, kind: String)] = []
         var largeFiles: [FileNode] = []
         var installers: [FileNode] = []
@@ -110,7 +113,14 @@ public struct ScanAnalyzer: Sendable {
         let downloadsNode = tree.node(atPath: knowledge.home + "/Downloads")
         let rootLocation = PatternTrie.best(in: trie.advance([trie.root], through: tree.rootPathComponents))?.index
 
-        func walk(_ node: FileNode, states: [PatternTrie.Node], inherited: Int?, project: ProjectScope, inDownloads: Bool) {
+        func walk(
+            _ node: FileNode,
+            states: [PatternTrie.Node],
+            inherited: Int?,
+            suggestedAncestor: FileNode?,
+            project: ProjectScope,
+            inDownloads: Bool
+        ) {
             let exact = states.isEmpty ? nil : PatternTrie.best(in: states)?.index
             let effective = exact ?? inherited
             let location = effective.map { locations[$0] } ?? Catalog.unknown
@@ -119,8 +129,13 @@ public struct ScanAnalyzer: Sendable {
             totals[location.category, default: 0] += own
             if location.countsAsSystemData { systemData += own }
 
+            var childSuggestedAncestor = suggestedAncestor
             if let exact, locations[exact].suggest {
                 matches[exact, default: []].append(node)
+                if let suggestedAncestor {
+                    nestedSize[ObjectIdentifier(suggestedAncestor), default: 0] += node.size
+                }
+                childSuggestedAncestor = node
             }
 
             if node.kind == .file {
@@ -153,17 +168,33 @@ public struct ScanAnalyzer: Sendable {
                     scope = .none
                 }
                 if node === homeNode, child.name == "Library" { scope = .none }
-                walk(child, states: childStates, inherited: effective, project: scope, inDownloads: childInDownloads)
+                walk(
+                    child,
+                    states: childStates,
+                    inherited: effective,
+                    suggestedAncestor: childSuggestedAncestor,
+                    project: scope,
+                    inDownloads: childInDownloads
+                )
             }
         }
 
         let rootStates = trie.advance([trie.root], through: tree.rootPathComponents)
-        walk(tree.root, states: rootStates, inherited: rootLocation, project: tree.root === homeNode ? .eligible : .none, inDownloads: false)
+        walk(
+            tree.root,
+            states: rootStates,
+            inherited: rootLocation,
+            suggestedAncestor: nil,
+            project: tree.root === homeNode ? .eligible : .none,
+            inDownloads: false
+        )
 
         var findings: [Finding] = []
         for index in matches.keys.sorted() {
             guard let nodes = matches[index] else { continue }
-            if let finding = makeFinding(location: locations[index], nodes: nodes, tree: tree), finding.totalSize >= minimumFindingSize {
+            let exclusiveSizes = nodes.map { $0.size - (nestedSize[ObjectIdentifier($0)] ?? 0) }
+            if let finding = makeFinding(location: locations[index], nodes: nodes, exclusiveSizes: exclusiveSizes, tree: tree),
+               finding.totalSize >= minimumFindingSize {
                 findings.append(finding)
             }
         }
@@ -211,7 +242,7 @@ public struct ScanAnalyzer: Sendable {
 
     private func makeItem(node: FileNode, path: String, name: String, detail: String?, kind: CleanupTarget.Kind) -> FoundItem {
         let explanation = knowledge.explain(path: path, isDirectory: node.isDirectory)
-        let verdict = policy.check(path, kind: kind)
+        let verdict = kind == .item ? policy.check(node, at: path) : policy.check(path, kind: kind)
         let target = verdict.isAllowed
             ? CleanupTarget(path: path, kind: kind, title: name, size: node.size, safety: explanation.safety, isFolder: node.isDirectory)
             : nil
@@ -236,8 +267,10 @@ public struct ScanAnalyzer: Sendable {
         return node.name
     }
 
-    private func makeFinding(location: KnownLocation, nodes: [FileNode], tree: FileTree) -> Finding? {
-        let total = nodes.reduce(Int64(0)) { $0 + $1.size }
+    /// - Parameter exclusiveSizes: each node's size minus anything inside it that's listed as a
+    ///   separate suggestion.
+    private func makeFinding(location: KnownLocation, nodes: [FileNode], exclusiveSizes: [Int64], tree: FileTree) -> Finding? {
+        let total = exclusiveSizes.reduce(0, +)
         guard total > 0 else { return nil }
         let paths = nodes.map { tree.path(of: $0) }
 
@@ -288,13 +321,13 @@ public struct ScanAnalyzer: Sendable {
                     ))
                 }
             } else {
-                for (node, path) in zip(nodes, paths) {
+                for (index, (node, path)) in zip(nodes, paths).enumerated() {
                     let name = displayName(for: location, path: path, node: node)
                     let verdict = policy.check(path, kind: .contents)
                     items.append(FoundItem(
                         path: path,
                         name: name,
-                        size: node.size,
+                        size: exclusiveSizes[index],
                         modified: node.modified > 0 ? node.modificationDate : nil,
                         detail: nil,
                         safety: location.safety,
@@ -316,11 +349,11 @@ public struct ScanAnalyzer: Sendable {
             }
 
         case .manual, .individually:
-            for (node, path) in zip(nodes, paths) {
+            for (index, (node, path)) in zip(nodes, paths).enumerated() {
                 items.append(FoundItem(
                     path: path,
                     name: displayName(for: location, path: path, node: node),
-                    size: node.size,
+                    size: exclusiveSizes[index],
                     modified: node.modified > 0 ? node.modificationDate : nil,
                     detail: nil,
                     safety: location.safety,
