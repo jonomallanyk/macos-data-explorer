@@ -55,12 +55,18 @@ public struct ScanReport: Sendable {
     public let duration: TimeInterval
     public let scannedAt: Date
 
-    public var sortedCategories: [(category: StorageCategory, bytes: Int64)] {
+    public var sortedCategories: [CategoryTotal] {
         categoryTotals
-            .map { (category: $0.key, bytes: $0.value) }
+            .map { CategoryTotal(category: $0.key, bytes: $0.value) }
             .filter { $0.bytes > 0 }
             .sorted { $0.bytes > $1.bytes }
     }
+}
+
+public struct CategoryTotal: Identifiable, Sendable {
+    public let category: StorageCategory
+    public let bytes: Int64
+    public var id: StorageCategory { category }
 }
 
 /// Turns a raw scan into categories, suggestions and a list of large files.

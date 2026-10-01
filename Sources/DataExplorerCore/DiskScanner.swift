@@ -56,6 +56,14 @@ public struct ScanOutput: Sendable {
     public let unreadablePaths: [String]
     public let duration: TimeInterval
     public let finishedAt: Date
+
+    public init(tree: FileTree, unreadableCount: Int, unreadablePaths: [String], duration: TimeInterval, finishedAt: Date) {
+        self.tree = tree
+        self.unreadableCount = unreadableCount
+        self.unreadablePaths = unreadablePaths
+        self.duration = duration
+        self.finishedAt = finishedAt
+    }
 }
 
 public enum ScanError: Error, LocalizedError {
