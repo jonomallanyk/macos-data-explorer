@@ -30,3 +30,38 @@ jobs:
           name: Data-Explorer-app
           path: build/Data-Explorer.zip
           if-no-files-found: error
+
+  # Runs the real app through every screen on a CI Mac and commits the screenshots used in
+  # the README. Runs when a pushed commit message contains "[screenshots]", or on demand.
+  screenshots:
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[screenshots]'))
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app
+        run: UNIVERSAL=0 ./scripts/build-app.sh
+
+      - name: Capture screenshots
+        timeout-minutes: 30
+        run: |
+          rm -rf docs/screenshots
+          mkdir -p docs/screenshots
+          DATA_EXPLORER_SCREENSHOTS="$PWD/docs/screenshots" "build/Data Explorer.app/Contents/MacOS/DataExplorer"
+          ls -la docs/screenshots
+
+      - name: Commit screenshots
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/screenshots
+          if git diff --cached --quiet; then
+            echo "Screenshots unchanged"
+            exit 0
+          fi
+          git commit -m "Update app screenshots"
+          git pull --rebase origin "$GITHUB_REF_NAME"
+          git push origin "HEAD:$GITHUB_REF_NAME"

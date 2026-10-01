@@ -56,6 +56,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             model.refreshAccess()
         }
+        .task {
+            await ScreenshotMode.run(model: model)
+        }
     }
 
     @ViewBuilder

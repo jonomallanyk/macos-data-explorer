@@ -6,12 +6,13 @@ struct CleanupView: View {
     @Environment(AppModel.self) private var model
     @State private var confirming = false
     @State private var showFailures = false
+    @State private var confirmingEmptyTrash = false
 
     var body: some View {
         @Bindable var model = model
         VStack(spacing: 0) {
             if let outcome = model.lastOutcome {
-                OutcomeBanner(outcome: outcome, showFailures: $showFailures)
+                OutcomeBanner(outcome: outcome, showFailures: $showFailures, confirmingEmptyTrash: $confirmingEmptyTrash)
             }
             if model.basket.isEmpty {
                 if model.lastOutcome == nil {
@@ -39,6 +40,11 @@ struct CleanupView: View {
             }
         } message: {
             Text(confirmMessage)
+        }
+        .confirmationDialog("Empty the Trash?", isPresented: $confirmingEmptyTrash) {
+            Button("Empty Trash", role: .destructive) { model.emptyTrash() }
+        } message: {
+            Text("This permanently deletes everything in the Trash, including anything you put there before.")
         }
     }
 
@@ -137,6 +143,10 @@ struct CleanupView: View {
         lines.append(model.cleanupMode == .moveToTrash
             ? "About \(size) will move to the Trash."
             : "About \(size) will be deleted. This can't be undone.")
+        let trashFolder = model.home + "/.Trash"
+        if model.basket.targets.contains(where: { $0.path == trashFolder || $0.path.hasPrefix(trashFolder + "/") }) {
+            lines.append("Items that are already in the Trash are deleted permanently.")
+        }
         let cautious = model.basket.targets.filter { $0.safety >= .caution }.count
         let review = model.basket.targets.filter { $0.safety == .review }.count
         if cautious > 0 {
@@ -199,6 +209,7 @@ private struct OutcomeBanner: View {
     @Environment(AppModel.self) private var model
     let outcome: CleanupOutcome
     @Binding var showFailures: Bool
+    @Binding var confirmingEmptyTrash: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -218,7 +229,7 @@ private struct OutcomeBanner: View {
                 }
                 Spacer()
                 if outcome.mode == .moveToTrash && outcome.bytesHandled > 0 {
-                    Button("Empty Trash") { model.emptyTrash() }
+                    Button("Empty Trash…") { confirmingEmptyTrash = true }
                         .disabled(model.isCleaning)
                 }
                 Button("Done") { model.lastOutcome = nil }

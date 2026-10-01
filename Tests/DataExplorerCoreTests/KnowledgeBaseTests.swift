@@ -102,6 +102,7 @@ final class KnowledgeBaseTests: XCTestCase {
         XCTAssertTrue(InstalledApps.isInstalled("com.Spotify.Client", in: installed))
         XCTAssertFalse(InstalledApps.isInstalled("com.example.gone", in: installed))
         XCTAssertFalse(InstalledApps.isInstalled("com.microsoft.word", in: installed))
+        XCTAssertTrue(InstalledApps.isInstalled("UBF8T346G9.com.spotify.client.helper", in: installed))
     }
 }
 

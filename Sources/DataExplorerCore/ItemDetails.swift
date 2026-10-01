@@ -138,9 +138,14 @@ public enum InstalledApps {
     /// True when an installed app's ID equals the given ID or is a prefix of it
     /// (extensions and helpers use IDs like "com.example.app.widget").
     public static func isInstalled(_ identifier: String, in installed: Set<String>) -> Bool {
-        let id = identifier.lowercased()
+        var parts = identifier.split(separator: ".")
+        // Some IDs start with the developer's 10-character team ID, e.g. "2BUA8C4S2C.com.example.app".
+        if let first = parts.first, first.count == 10, first.allSatisfy({ $0.isASCII && ($0.isUppercase || $0.isNumber) }) {
+            parts.removeFirst()
+        }
+        let id = parts.joined(separator: ".").lowercased()
         if installed.contains(id) { return true }
-        var parts = id.split(separator: ".")
+        parts = id.split(separator: ".")
         while parts.count > 2 {
             parts.removeLast()
             if installed.contains(parts.joined(separator: ".")) { return true }

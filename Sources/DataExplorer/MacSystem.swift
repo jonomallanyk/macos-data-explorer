@@ -5,15 +5,16 @@ import DataExplorerCore
 enum MacSystem {
     static let fullDiskAccessSettingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")!
 
-    /// Full Disk Access can't be queried directly, so check whether a few protected
-    /// locations can be read. None of these checks triggers a permission prompt.
+    /// Full Disk Access can't be queried directly, so check whether a few locations that only
+    /// Full Disk Access unlocks can be read. These are silently denied otherwise, so the check
+    /// never triggers a permission prompt. (Folders like Documents or other apps' containers
+    /// would prompt, so they're deliberately not used.)
     static func hasFullDiskAccess() -> Bool {
         let home = NSHomeDirectory()
         let probes = [
             home + "/Library/Safari",
             home + "/Library/Mail",
             home + "/Library/Messages",
-            home + "/Library/Containers/com.apple.stocks",
             "/Library/Application Support/com.apple.TCC",
         ]
         for path in probes where FileManager.default.fileExists(atPath: path) {
