@@ -92,9 +92,11 @@ the network at all.
   databases), keychains, iCloud Drive or other cloud folders, Mail or Messages storage,
   Photos/Music/TV libraries, the inside of app bundles, other users' folders, or any folder
   that contains folders macOS and apps expect to exist (such as your home or Library folder).
+- It won't delete single code libraries or programs from inside an installed tool (a stray
+  `.dylib` in an SDK, say), because that breaks the tool. You can still remove the whole tool.
 - For things that shouldn't be deleted directly (Docker's disk image, the Spotlight index,
-  Messages attachments, iCloud Drive, Homebrew…) it explains the proper way to free the space
-  instead.
+  Messages attachments, iCloud Drive, Homebrew, simulator runtimes…) it explains the proper
+  way to free the space instead.
 - Cache folders are emptied rather than removed, so apps find the folder where they expect it.
 - "Move to Trash" is the default. Choose "Delete immediately" only when you're sure.
 - Time Machine local snapshots are deleted with `tmutil`, after macOS asks for your password.

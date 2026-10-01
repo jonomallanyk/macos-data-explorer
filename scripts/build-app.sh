@@ -1,8 +1,8 @@
 #!/bin/bash
 # Builds "Data Explorer.app" into ./build with Swift Package Manager.
 #
-#   ./scripts/build-app.sh            # universal (Apple silicon + Intel) release build
-#   UNIVERSAL=0 ./scripts/build-app.sh  # just this Mac's architecture (faster)
+#   ./scripts/build-app.sh              # release build for this Mac
+#   UNIVERSAL=1 ./scripts/build-app.sh  # Apple silicon + Intel (needs the full Xcode app)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -11,7 +11,7 @@ APP_NAME="Data Explorer"
 PRODUCT="DataExplorer"
 BUILD_DIR="build"
 ARCH_FLAGS=()
-if [ "${UNIVERSAL:-1}" = "1" ]; then
+if [ "${UNIVERSAL:-0}" = "1" ]; then
   ARCH_FLAGS=(--arch arm64 --arch x86_64)
 fi
 
