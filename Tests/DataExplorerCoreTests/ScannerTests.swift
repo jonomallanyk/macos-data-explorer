@@ -140,6 +140,61 @@ final class ScannerTests: XCTestCase {
         XCTAssertEqual(tree.root.fileCount, 1)
     }
 
+    /// Builds a deep tree so the parallel scanner has folders to hand to other threads.
+    private func makeDeepTree() throws -> Sandbox {
+        let box = try Sandbox()
+        for branch in 0..<4 {
+            for leaf in 0..<3 {
+                let base = "b\(branch)/l1/l2/leaf\(leaf)"
+                try box.file("\(base)/big.bin", bytes: 1_100_000 + branch * 10_000 + leaf * 1_000)
+                try box.file("\(base)/small.txt", bytes: 300)
+                try box.file("\(base)/deeper/still/more/file.bin", bytes: 1_050_000)
+                try box.file("\(base)/deeper/note.txt", bytes: 20)
+            }
+            try box.file("b\(branch)/l1/top.bin", bytes: 1_300_000)
+            try box.file("b\(branch)/package.json", bytes: 10)
+        }
+        try box.file("root-file.bin", bytes: 1_400_000)
+        return box
+    }
+
+    private func assertSameTree(_ a: FileNode, _ b: FileNode, path: String = "", file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(a.size, b.size, "size of \(path)", file: file, line: line)
+        XCTAssertEqual(a.fileCount, b.fileCount, "fileCount of \(path)", file: file, line: line)
+        XCTAssertEqual(a.looseFileCount, b.looseFileCount, "loose files of \(path)", file: file, line: line)
+        XCTAssertEqual(a.looseFileSize, b.looseFileSize, "loose size of \(path)", file: file, line: line)
+        XCTAssertEqual(a.markers, b.markers, "markers of \(path)", file: file, line: line)
+        XCTAssertEqual(a.children.map(\.size), a.children.map(\.size).sorted(by: >), "order of \(path)", file: file, line: line)
+        XCTAssertEqual(Set(a.children.map(\.name)), Set(b.children.map(\.name)), "children of \(path)", file: file, line: line)
+        for child in a.children {
+            guard let other = b.child(named: child.name) else { continue }
+            XCTAssertTrue(child.parent === a, "parent of \(path)/\(child.name)", file: file, line: line)
+            assertSameTree(child, other, path: path + "/" + child.name, file: file, line: line)
+        }
+    }
+
+    func testParallelScanMatchesSequentialScan() throws {
+        let box = try makeDeepTree()
+        var sequential = ScanOptions.folder(box.root)
+        sequential.parallel = false
+        var parallel = ScanOptions.folder(box.root)
+        parallel.parallel = true
+        var deep = ScanOptions.folder(box.root)
+        deep.deepSplitPrefix = box.root + "/b1"
+
+        let expected = try DiskScanner.scan(sequential).tree.root
+        XCTAssertEqual(expected.fileCount, 4 * (3 * 4 + 2) + 1)
+        assertSameTree(try DiskScanner.scan(parallel).tree.root, expected)
+        assertSameTree(try DiskScanner.scan(deep).tree.root, expected)
+    }
+
+    func testParallelScanReportsProgressAndCancels() throws {
+        let box = try makeDeepTree()
+        let counter = ProgressCounter()
+        _ = try DiskScanner.scan(.folder(box.root), progress: { _ in counter.increment() })
+        XCTAssertThrowsError(try DiskScanner.scan(.folder(box.root), isCancelled: { true }))
+    }
+
     func testDataVolumePaths() {
         let root = FileNode(name: "Macintosh HD", kind: .directory, parent: nil)
         let users = FileNode(name: "Users", kind: .directory, parent: root)
@@ -155,5 +210,16 @@ final class ScannerTests: XCTestCase {
         XCTAssertTrue(tree.node(atPath: "/System/Volumes/Data/Users") === users)
         XCTAssertTrue(tree.node(atPath: "/System/Volumes/Data/.Spotlight-V100") === spotlight)
         XCTAssertNil(tree.node(atPath: "/.Spotlight-V100"))
+    }
+}
+
+final class ProgressCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private(set) var count = 0
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
     }
 }

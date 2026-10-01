@@ -20,28 +20,48 @@ public struct ScanOptions: Sendable {
     public var stayOnVolume: Bool
     /// Files at least this large are kept as separate entries; smaller ones are summed per folder.
     public var individualFileThreshold: Int64
+    /// Scan sub-folders on several threads at once.
+    public var parallel: Bool
+    /// Folders inside this path are split up one level deeper for parallel scanning. Set it to
+    /// the home folder, which usually holds most of the files.
+    public var deepSplitPrefix: String?
 
     public init(
         rootPath: String,
         style: FileTree.Style = .plain,
         displayName: String? = nil,
         stayOnVolume: Bool = true,
-        individualFileThreshold: Int64 = 1_000_000
+        individualFileThreshold: Int64 = 1_000_000,
+        parallel: Bool = true,
+        deepSplitPrefix: String? = nil
     ) {
         self.rootPath = rootPath
         self.style = style
         self.displayName = displayName ?? (rootPath as NSString).lastPathComponent
         self.stayOnVolume = stayOnVolume
         self.individualFileThreshold = individualFileThreshold
+        self.parallel = parallel
+        self.deepSplitPrefix = deepSplitPrefix
     }
 
     /// Scans the whole startup disk. On macOS that means the Data volume, which holds
     /// everything except the sealed, read-only system.
     public static func entireDisk(displayName: String) -> ScanOptions {
         if FileManager.default.fileExists(atPath: FileTree.dataVolumePath) {
-            return ScanOptions(rootPath: FileTree.dataVolumePath, style: .dataVolume, displayName: displayName)
+            return ScanOptions(
+                rootPath: FileTree.dataVolumePath,
+                style: .dataVolume,
+                displayName: displayName,
+                deepSplitPrefix: FileTree.dataVolumePath + NSHomeDirectory()
+            )
         }
-        return ScanOptions(rootPath: "/", style: .plain, displayName: displayName)
+        return ScanOptions(rootPath: "/", style: .plain, displayName: displayName, deepSplitPrefix: NSHomeDirectory())
+    }
+
+    /// Folders at this depth are handed to separate threads.
+    var splitLevel: Int? {
+        guard parallel else { return nil }
+        return style == .dataVolume ? 4 : 3
     }
 
     public static func folder(_ path: String) -> ScanOptions {
@@ -81,10 +101,82 @@ public enum ScanError: Error, LocalizedError {
 }
 
 /// Walks a folder tree with fts(3), measuring the space each item actually takes on disk.
+///
+/// The top few levels are walked first. Folders below that are then scanned in parallel, each
+/// with its own fts walk, and their totals are added to the folders above them at the end.
 public enum DiskScanner {
-    private struct HardLinkKey: Hashable {
+    struct HardLinkKey: Hashable {
         let device: UInt64
         let inode: UInt64
+    }
+
+    /// State shared by every thread taking part in one scan.
+    final class SharedState: @unchecked Sendable {
+        private let lock = NSLock()
+        private var hardLinks = Set<HardLinkKey>()
+        private var files = 0
+        private var folders = 0
+        private var bytes: Int64 = 0
+        private var lastReport: UInt64 = 0
+        private var cancelled = false
+        private(set) var unreadableCount = 0
+        private(set) var unreadablePaths: [String] = []
+        let progress: ((ScanProgress) -> Void)?
+
+        init(progress: ((ScanProgress) -> Void)?) {
+            self.progress = progress
+        }
+
+        /// False when another hard link to the same file was already counted.
+        func isFirstLink(_ key: HardLinkKey) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return hardLinks.insert(key).inserted
+        }
+
+        func noteUnreadable(_ path: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            unreadableCount += 1
+            if unreadablePaths.count < 200 { unreadablePaths.append(path) }
+        }
+
+        var isCancelled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return cancelled
+        }
+
+        func cancel() {
+            lock.lock()
+            cancelled = true
+            lock.unlock()
+        }
+
+        /// Adds one thread's counts, reporting progress at most every 150 ms.
+        func add(files newFiles: Int, folders newFolders: Int, bytes newBytes: Int64, currentPath: () -> String) {
+            lock.lock()
+            files += newFiles
+            folders += newFolders
+            bytes += newBytes
+            var snapshot: ScanProgress?
+            let now = DispatchTime.now().uptimeNanoseconds
+            if progress != nil, now - lastReport > 150_000_000 {
+                lastReport = now
+                snapshot = ScanProgress(filesScanned: files, foldersScanned: folders, bytesScanned: bytes, currentPath: "")
+            }
+            lock.unlock()
+            if var snapshot, let progress {
+                snapshot.currentPath = currentPath()
+                progress(snapshot)
+            }
+        }
+    }
+
+    private struct WalkResult {
+        let root: FileNode
+        /// Folders left for other threads to scan, with their paths.
+        let deferred: [(node: FileNode, path: String)]
     }
 
     public static func scan(
@@ -93,9 +185,94 @@ public enum DiskScanner {
         progress: ((ScanProgress) -> Void)? = nil
     ) throws -> ScanOutput {
         let start = Date()
+        let shared = SharedState(progress: progress)
 
-        guard let rootCString = strdup(options.rootPath) else {
-            throw ScanError.cannotOpen(options.rootPath, ENOMEM)
+        let first = try walk(
+            path: options.rootPath,
+            existingRoot: nil,
+            splitLevel: options.splitLevel,
+            options: options,
+            shared: shared,
+            isCancelled: isCancelled
+        )
+        let root = first.root
+        let deferred = first.deferred
+
+        if !deferred.isEmpty {
+            let sizesBefore = deferred.map { $0.node.size }
+            DispatchQueue.concurrentPerform(iterations: deferred.count) { index in
+                if shared.isCancelled { return }
+                let item = deferred[index]
+                do {
+                    _ = try walk(
+                        path: item.path,
+                        existingRoot: item.node,
+                        splitLevel: nil,
+                        options: options,
+                        shared: shared,
+                        isCancelled: isCancelled
+                    )
+                } catch ScanError.cancelled {
+                    shared.cancel()
+                } catch {
+                    item.node.isUnreadable = true
+                    shared.noteUnreadable(item.path)
+                }
+            }
+            if shared.isCancelled { throw ScanError.cancelled }
+
+            // Add what each thread found to the folders above it, then re-sort those folders.
+            var deferredIDs = Set<ObjectIdentifier>()
+            for (index, item) in deferred.enumerated() {
+                deferredIDs.insert(ObjectIdentifier(item.node))
+                let addedSize = item.node.size - sizesBefore[index]
+                let addedFiles = item.node.fileCount
+                var ancestor = item.node.parent
+                while let node = ancestor {
+                    node.size += addedSize
+                    node.fileCount += addedFiles
+                    ancestor = node.parent
+                }
+            }
+            resort(root, skipping: deferredIDs)
+        }
+
+        if isCancelled() { throw ScanError.cancelled }
+
+        let tree = FileTree(root: root, rootPath: options.rootPath, style: options.style, displayName: options.displayName)
+        return ScanOutput(
+            tree: tree,
+            unreadableCount: shared.unreadableCount,
+            unreadablePaths: shared.unreadablePaths,
+            duration: Date().timeIntervalSince(start),
+            finishedAt: Date()
+        )
+    }
+
+    private static func resort(_ node: FileNode, skipping finished: Set<ObjectIdentifier>) {
+        node.children.sort { $0.size > $1.size }
+        for child in node.children where child.isDirectory && !finished.contains(ObjectIdentifier(child)) {
+            resort(child, skipping: finished)
+        }
+    }
+
+    /// Walks one folder tree.
+    ///
+    /// - Parameters:
+    ///   - existingRoot: When set, the folder's node was already created by the first pass and
+    ///     this walk fills in its contents.
+    ///   - splitLevel: Folders at this depth (one deeper inside `deepSplitPrefix`) are skipped
+    ///     and returned so they can be scanned in parallel.
+    private static func walk(
+        path rootPath: String,
+        existingRoot: FileNode?,
+        splitLevel: Int?,
+        options: ScanOptions,
+        shared: SharedState,
+        isCancelled: () -> Bool
+    ) throws -> WalkResult {
+        guard let rootCString = strdup(rootPath) else {
+            throw ScanError.cannotOpen(rootPath, ENOMEM)
         }
         defer { free(rootCString) }
         var argv: [UnsafeMutablePointer<CChar>?] = [rootCString, nil]
@@ -104,21 +281,20 @@ public enum DiskScanner {
         if options.stayOnVolume { flags |= FTS_XDEV }
 
         guard let fts = fts_open(&argv, flags, nil) else {
-            throw ScanError.cannotOpen(options.rootPath, errno)
+            throw ScanError.cannotOpen(rootPath, errno)
         }
         defer { fts_close(fts) }
 
         var root: FileNode?
+        var deferred: [(node: FileNode, path: String)] = []
         var stack: [(node: FileNode, level: Int)] = []
-        var hardLinks = Set<HardLinkKey>()
-        var unreadableCount = 0
-        var unreadablePaths: [String] = []
+        var rootDevice: UInt64 = 0
         var files = 0
         var folders = 0
         var bytes: Int64 = 0
         var entriesSinceCheck = 0
-        var lastReport = DispatchTime.now().uptimeNanoseconds
         let threshold = options.individualFileThreshold
+        let deepPrefix = options.deepSplitPrefix.map { $0 + "/" }
 
         func finishTop() {
             let finished = stack.removeLast().node
@@ -135,28 +311,22 @@ public enum DiskScanner {
             }
         }
 
-        func noteUnreadable(_ path: String) {
-            unreadableCount += 1
-            if unreadablePaths.count < 200 { unreadablePaths.append(path) }
+        func flushCounts(_ entry: UnsafeMutablePointer<FTSENT>?) {
+            shared.add(files: files, folders: folders, bytes: bytes) {
+                guard let entry, let path = entry.pointee.fts_path else { return rootPath }
+                return String(cString: path)
+            }
+            files = 0
+            folders = 0
+            bytes = 0
         }
 
         while let entryPointer = fts_read(fts) {
             entriesSinceCheck += 1
             if entriesSinceCheck >= 512 {
                 entriesSinceCheck = 0
-                if isCancelled() { throw ScanError.cancelled }
-                if let progress {
-                    let now = DispatchTime.now().uptimeNanoseconds
-                    if now - lastReport > 150_000_000 {
-                        lastReport = now
-                        progress(ScanProgress(
-                            filesScanned: files,
-                            foldersScanned: folders,
-                            bytesScanned: bytes,
-                            currentPath: String(cString: entryPointer.pointee.fts_path)
-                        ))
-                    }
-                }
+                if isCancelled() || shared.isCancelled { throw ScanError.cancelled }
+                flushCounts(entryPointer)
             }
 
             let entry = entryPointer.pointee
@@ -169,13 +339,23 @@ public enum DiskScanner {
 
             case Int32(FTS_D):
                 popToLevel(level)
+                let st = entry.fts_statp.pointee
+                let device = UInt64(truncatingIfNeeded: st.st_dev)
+                if level == 0 {
+                    rootDevice = device
+                    if let existingRoot {
+                        // Counted and sized by the first pass already.
+                        root = existingRoot
+                        stack.append((existingRoot, 0))
+                        continue
+                    }
+                }
                 let parent = stack.last?.node
                 let node = FileNode(
                     name: parent == nil ? options.displayName : name(of: entry),
                     kind: .directory,
                     parent: parent
                 )
-                let st = entry.fts_statp.pointee
                 node.size = Int64(st.st_blocks) * 512
                 node.modified = modificationTime(st)
                 if let parent {
@@ -187,9 +367,20 @@ public enum DiskScanner {
                 folders += 1
                 bytes += node.size
 
+                // Hand deeper folders to other threads. Mount points are left alone: fts won't
+                // descend into them, and neither should anyone else.
+                if let splitLevel, level >= splitLevel, device == rootDevice {
+                    let path = String(cString: entry.fts_path)
+                    let deep = deepPrefix.map { path.hasPrefix($0) } ?? false
+                    if level == splitLevel + (deep ? 1 : 0) {
+                        deferred.append((node, path))
+                        _ = fts_set(fts, entryPointer, Int32(FTS_SKIP))
+                    }
+                }
+
             case Int32(FTS_DNR), Int32(FTS_ERR):
                 let entryName = name(of: entry)
-                noteUnreadable(String(cString: entry.fts_path))
+                shared.noteUnreadable(String(cString: entry.fts_path))
                 if info == Int32(FTS_DNR), let top = stack.last, top.level == level,
                    top.node.name == entryName || level == 0 {
                     // The folder was already added when fts reported it; it just couldn't be listed.
@@ -202,7 +393,7 @@ public enum DiskScanner {
                         parent.children.append(node)
                     }
                 } else if root == nil {
-                    throw ScanError.cannotOpen(options.rootPath, entry.fts_errno)
+                    throw ScanError.cannotOpen(rootPath, entry.fts_errno)
                 }
 
             case Int32(FTS_DC):
@@ -210,9 +401,9 @@ public enum DiskScanner {
                 continue
 
             case Int32(FTS_NS):
-                noteUnreadable(String(cString: entry.fts_path))
+                shared.noteUnreadable(String(cString: entry.fts_path))
                 if level == 0 && root == nil {
-                    throw ScanError.cannotOpen(options.rootPath, entry.fts_errno)
+                    throw ScanError.cannotOpen(rootPath, entry.fts_errno)
                 }
 
             default:
@@ -225,8 +416,8 @@ public enum DiskScanner {
                         device: UInt64(truncatingIfNeeded: st.st_dev),
                         inode: UInt64(truncatingIfNeeded: st.st_ino)
                     )
-                    if !hardLinks.insert(key).inserted {
-                        // Another link to a file we've already counted.
+                    if !shared.isFirstLink(key) {
+                        // Another link to a file that's already been counted.
                         allocated = 0
                     }
                 }
@@ -269,21 +460,14 @@ public enum DiskScanner {
             }
         }
 
-        if isCancelled() { throw ScanError.cancelled }
+        if isCancelled() || shared.isCancelled { throw ScanError.cancelled }
         while !stack.isEmpty { finishTop() }
+        flushCounts(nil)
 
         guard let root else {
-            throw ScanError.cannotOpen(options.rootPath, errno == 0 ? ENOENT : errno)
+            throw ScanError.cannotOpen(rootPath, errno == 0 ? ENOENT : errno)
         }
-
-        let tree = FileTree(root: root, rootPath: options.rootPath, style: options.style, displayName: options.displayName)
-        return ScanOutput(
-            tree: tree,
-            unreadableCount: unreadableCount,
-            unreadablePaths: unreadablePaths,
-            duration: Date().timeIntervalSince(start),
-            finishedAt: Date()
-        )
+        return WalkResult(root: root, deferred: deferred)
     }
 
     /// The entry's file name. fts stores it at the end of `fts_path`.

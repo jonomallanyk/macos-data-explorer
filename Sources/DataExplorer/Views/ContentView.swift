@@ -50,6 +50,9 @@ struct ContentView: View {
                 }
             }
         }
+        .sheet(isPresented: $model.showAccessPrompt) {
+            FullDiskAccessSheet()
+        }
         .alert(item: $model.notice) { notice in
             Alert(title: Text(notice.title), message: Text(notice.message))
         }
@@ -158,6 +161,46 @@ struct FullDiskAccessBanner: View {
         .padding(.vertical, 10)
         .background(Color.orange.opacity(0.1))
         .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+struct FullDiskAccessSheet: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(spacing: 12) {
+                Image(systemName: "lock.shield")
+                    .font(.system(size: 34))
+                    .foregroundStyle(.orange)
+                Text("Allow Full Disk Access first?")
+                    .font(.title2.weight(.semibold))
+            }
+            Text("macOS keeps some folders private: Mail, Messages, Safari, other apps' data and parts of your Library. Without Full Disk Access, Data Explorer can't measure them, and macOS will interrupt the scan to ask about several folders one at a time.")
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("1. Click Open System Settings.")
+                Text("2. Turn on Data Explorer in the Full Disk Access list. If it's missing, click + and choose it from Applications.")
+                Text("3. When macOS asks, choose Quit & Reopen, then scan again.")
+            }
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                Button("Cancel", role: .cancel) { model.showAccessPrompt = false }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Scan Without It") { model.scanWithoutFullDiskAccess() }
+                Button("Open System Settings") {
+                    MacSystem.openFullDiskAccessSettings()
+                    model.showAccessPrompt = false
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(24)
+        .frame(width: 520)
     }
 }
 

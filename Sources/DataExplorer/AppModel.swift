@@ -86,6 +86,8 @@ final class AppModel {
     var snapshots: [LocalSnapshot] = []
     var hasFullDiskAccess = false
     var isDeletingSnapshots = false
+    /// Asks the user to grant Full Disk Access before a scan that would otherwise be incomplete.
+    var showAccessPrompt = false
 
     // Navigation
     var selection: SidebarItem? = .overview
@@ -105,6 +107,7 @@ final class AppModel {
 
     @ObservationIgnored private var activeScan: CancellationFlag?
     @ObservationIgnored private var installedAppIDs: Set<String>?
+    @ObservationIgnored private var userDeclinedFullDiskAccess = false
 
     init() {
         knowledge = KnowledgeBase.standard(home: home)
@@ -156,8 +159,18 @@ final class AppModel {
 
     // MARK: - Scanning
 
-    func startScan(scope newScope: ScanScope? = nil) {
+    func startScan(scope newScope: ScanScope? = nil, skipAccessCheck: Bool = false) {
         if let newScope { scope = newScope }
+        refreshAccess()
+        let needsAccess: Bool
+        switch scope {
+        case .entireMac, .home: needsAccess = true
+        case .folder: needsAccess = false
+        }
+        if needsAccess && !hasFullDiskAccess && !userDeclinedFullDiskAccess && !skipAccessCheck {
+            showAccessPrompt = true
+            return
+        }
         activeScan?.cancel()
 
         let options: ScanOptions
@@ -175,7 +188,6 @@ final class AppModel {
         phase = .scanning
         progress = nil
         scanStartedAt = Date()
-        refreshAccess()
 
         let knowledge = self.knowledge
         let policy = self.policy
@@ -198,6 +210,12 @@ final class AppModel {
                 Task { @MainActor in model.failScan(message, cancelled: cancelled, flag: flag) }
             }
         }
+    }
+
+    func scanWithoutFullDiskAccess() {
+        userDeclinedFullDiskAccess = true
+        showAccessPrompt = false
+        startScan()
     }
 
     func cancelScan() {

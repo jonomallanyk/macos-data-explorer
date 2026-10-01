@@ -26,7 +26,7 @@ enum ScreenshotMode {
         capture(window, "01-welcome", in: folder)
 
         let scope: ScanScope = environment["DATA_EXPLORER_SCREENSHOT_SCOPE"] == "home" ? .home : .entireMac
-        model.startScan(scope: scope)
+        model.startScan(scope: scope, skipAccessCheck: true)
         await pause(4)
         capture(window, "02-scanning", in: folder)
         while model.isScanning { await pause(0.5) }
