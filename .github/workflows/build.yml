@@ -50,6 +50,7 @@ jobs:
         run: |
           rm -rf docs/screenshots
           mkdir -p docs/screenshots
+          cp build/AppIcon.iconset/icon_256x256@2x.png docs/screenshots/00-icon.png
           DATA_EXPLORER_SCREENSHOTS="$PWD/docs/screenshots" "build/Data Explorer.app/Contents/MacOS/DataExplorer"
           ls -la docs/screenshots
 

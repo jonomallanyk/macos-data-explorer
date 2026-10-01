@@ -15,17 +15,20 @@ if [ "${UNIVERSAL:-1}" = "1" ]; then
   ARCH_FLAGS=(--arch arm64 --arch x86_64)
 fi
 
-swift build -c release "${ARCH_FLAGS[@]}" --product "$PRODUCT"
-BIN_PATH="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)"
+swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --product "$PRODUCT"
+BIN_PATH="$(swift build -c release ${ARCH_FLAGS[@]+"${ARCH_FLAGS[@]}"} --show-bin-path)"
 
 APP="$BUILD_DIR/$APP_NAME.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_PATH/$PRODUCT" "$APP/Contents/MacOS/$PRODUCT"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-if [ -f Resources/AppIcon.icns ]; then
-  cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
-fi
+
+# The icon is drawn in code, so there are no image files to keep in sync.
+ICONSET="$BUILD_DIR/AppIcon.iconset"
+rm -rf "$ICONSET"
+swift scripts/make-icon.swift "$ICONSET"
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
 # An ad-hoc signature gives the app a stable identity, which macOS needs to remember
 # permissions such as Full Disk Access.
