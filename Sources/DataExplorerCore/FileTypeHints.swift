@@ -191,6 +191,14 @@ public enum FileTypeHints {
         for ext in ["sqlite", "sqlite3", "db", "realm", "ldb"] {
             table[ext] = make("App database", "A database an app uses to store its data.", "The app may lose data or need to rebuild it.", .caution)
         }
+        for ext in ["dylib", "so", "a", "o", "jar", "node", "dll", "exe", "pyd", "wasm"] {
+            table[ext] = make(
+                "Part of a program",
+                "A code library or compiled file that belongs to an installed program or developer tool.",
+                "The program it belongs to stops working. Remove the whole program instead.",
+                .caution
+            )
+        }
         for ext in ["ipa", "apk", "aab"] {
             table[ext] = make("Mobile app package", "An app package for a phone or tablet.", "The package is gone.", .review)
         }

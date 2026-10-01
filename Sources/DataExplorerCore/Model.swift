@@ -72,7 +72,7 @@ public enum StorageCategory: String, CaseIterable, Sendable, Codable, Identifiab
         switch self {
         case .apps: return "Apps"
         case .personalFiles: return "Your files"
-        case .mediaLibraries: return "Photos, music & video libraries"
+        case .mediaLibraries: return "Photos & media libraries"
         case .cloudFiles: return "iCloud Drive & cloud folders"
         case .mailAndMessages: return "Mail & Messages"
         case .deviceBackups: return "iPhone & iPad backups"
@@ -181,13 +181,15 @@ public struct CleanupTarget: Hashable, Identifiable, Sendable {
     public let title: String
     public let size: Int64
     public let safety: SafetyLevel
+    public let isFolder: Bool
 
-    public init(path: String, kind: Kind, title: String, size: Int64, safety: SafetyLevel) {
+    public init(path: String, kind: Kind, title: String, size: Int64, safety: SafetyLevel, isFolder: Bool = false) {
         self.path = path
         self.kind = kind
         self.title = title
         self.size = size
         self.safety = safety
+        self.isFolder = isFolder || kind == .contents
     }
 
     public var id: String { kind.rawValue + ":" + path }

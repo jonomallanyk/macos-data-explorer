@@ -56,6 +56,7 @@ struct SuggestionsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     header(report: report, shown: findings)
+                        .id("suggestions-top")
                     ForEach(findings) { finding in
                         FindingCard(finding: finding, isExpanded: binding(for: finding.id))
                             .id(finding.id)
@@ -76,7 +77,9 @@ struct SuggestionsView: View {
                 filter = .all
                 expanded.insert(id)
                 try? await Task.sleep(for: .milliseconds(150))
-                withAnimation { proxy.scrollTo(id, anchor: .top) }
+                // Keep the summary in view when the finding is already at the top of the list.
+                let target = filtered(report.findings).first?.id == id ? "suggestions-top" : id
+                withAnimation { proxy.scrollTo(target, anchor: .top) }
                 model.focusedFindingID = nil
             }
         }
@@ -238,9 +241,12 @@ struct FindingCard: View {
         }
     }
 
+    private var realItemCount: Int {
+        finding.items.filter { !$0.isSummary }.count
+    }
+
     private var itemCountText: String {
-        let count = finding.items.filter { !$0.isSummary }.count
-        return count == 1 ? "1 item" : "\(count) items"
+        realItemCount == 1 ? "1 item" : "\(realItemCount) items"
     }
 
     private var details: some View {
@@ -256,7 +262,7 @@ struct FindingCard: View {
                 }
             }
             if finding.items.count > collapsedItemLimit {
-                Button(showAllItems ? "Show fewer" : "Show all \(finding.items.count) items") {
+                Button(showAllItems ? "Show fewer" : "Show all \(realItemCount) items") {
                     showAllItems.toggle()
                 }
                 .buttonStyle(.link)

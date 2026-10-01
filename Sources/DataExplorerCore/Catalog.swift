@@ -450,6 +450,18 @@ enum Catalog {
             ifDeleted: "Developer tools may stop working."
         ),
         KnownLocation(
+            id: "simulator-runtime-assets",
+            title: "Simulator runtimes (in system assets)",
+            paths: ["/System/Library/AssetsV2/com_apple_MobileAsset_*SimulatorRuntime"],
+            category: .developer,
+            safety: .review,
+            cleanup: .manual("In Xcode › Settings › Components (called Platforms in older versions), delete simulator runtimes you don't need. Or in Terminal run `xcrun simctl runtime list`, then `xcrun simctl runtime delete <id>`."),
+            systemData: true,
+            suggest: true,
+            whatItIs: "iOS, watchOS, tvOS and visionOS runtimes that Xcode downloaded for the simulator. macOS 14 and later store them alongside its own system assets, which is why they're counted as System Data. Each is 5–10 GB.",
+            ifDeleted: "You can't run simulators for those OS versions until you download them again."
+        ),
+        KnownLocation(
             id: "simulator-runtimes",
             title: "Simulator runtimes",
             paths: ["/Library/Developer/CoreSimulator"],
@@ -553,7 +565,8 @@ enum Catalog {
             paths: ["~/Documents/Zoom"],
             category: .personalFiles,
             safety: .review,
-            cleanup: .individually,
+            cleanup: .trashContents,
+            suggest: true,
             whatItIs: "Meeting recordings saved by Zoom.",
             ifDeleted: "The recordings are gone unless you have another copy."
         ),
@@ -1003,6 +1016,16 @@ enum Catalog {
             ifDeleted: "The simulator rebuilds them; the next launch is slower."
         ),
         KnownLocation(
+            id: "xcode-user-data",
+            title: "Xcode settings",
+            paths: ["~/Library/Developer/Xcode/UserData"],
+            category: .developer,
+            safety: .caution,
+            cleanup: .individually,
+            whatItIs: "Your Xcode customisations: key bindings, code snippets, colour themes and breakpoints.",
+            ifDeleted: "Xcode forgets your customisations."
+        ),
+        KnownLocation(
             id: "xcode-previews",
             title: "SwiftUI preview & playground simulators",
             paths: ["~/Library/Developer/Xcode/UserData/Previews", "~/Library/Developer/XCPGDevices"],
@@ -1184,14 +1207,25 @@ enum Catalog {
             ifDeleted: "Models have to be downloaded again."
         ),
         KnownLocation(
+            id: "android",
+            title: "Android Studio data",
+            paths: ["~/Library/Android"],
+            category: .developer,
+            safety: .review,
+            cleanup: .trashItem,
+            whatItIs: "Android development tools installed by Android Studio.",
+            ifDeleted: "Android builds stop working until the tools are reinstalled."
+        ),
+        KnownLocation(
             id: "android-sdk",
             title: "Android SDK",
             paths: ["~/Library/Android/sdk"],
             category: .developer,
             safety: .review,
-            cleanup: .individually,
-            whatItIs: "Android development tools, platforms and emulator images installed by Android Studio. Manage it from Android Studio › Settings › Android SDK.",
-            ifDeleted: "Android builds stop working until components are reinstalled."
+            cleanup: .trashItem,
+            suggest: true,
+            whatItIs: "Android development tools, platforms, NDKs and emulator images installed by Android Studio. Often 10–30 GB. To trim it instead, remove components in Android Studio › Settings › Languages & Frameworks › Android SDK.",
+            ifDeleted: "Android builds stop working until Android Studio downloads the SDK again. If you don't build Android apps any more, it's safe to remove."
         ),
         KnownLocation(
             id: "android-images",

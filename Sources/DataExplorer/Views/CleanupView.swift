@@ -166,7 +166,7 @@ private struct TargetRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: target.kind == .contents ? "folder.badge.minus" : "doc")
+            Image(systemName: target.kind == .contents ? "folder.badge.minus" : (target.isFolder ? "folder" : "doc"))
                 .foregroundStyle(.secondary)
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {

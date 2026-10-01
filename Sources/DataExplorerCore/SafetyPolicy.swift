@@ -1,4 +1,9 @@
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Decides whether Data Explorer is allowed to delete something.
 ///
@@ -24,10 +29,8 @@ public struct SafetyPolicy: Sendable {
     public let exceptions: [String]
     /// Cloud-synced folders where deleting removes files everywhere.
     public let cloudPrefixes: [String]
-    /// Known folders that must survive when a folder containing them is deleted.
-    private let itemGuards: [String]
-    /// Known folders that must survive when the contents of a folder containing them are deleted.
-    private let contentGuards: [String]
+    /// Essential folders that must survive when a folder containing them is deleted or emptied.
+    private let guardedFolders: [String]
 
     public init(knowledge: KnowledgeBase, protectedPrefixes: [String]? = nil, exceptions: [String]? = nil) {
         let home = knowledge.home
@@ -35,25 +38,14 @@ public struct SafetyPolicy: Sendable {
         self.protectedPrefixes = (protectedPrefixes ?? Self.defaultProtectedPrefixes(home: home)).map { $0.lowercased() }
         self.exceptions = (exceptions ?? ["/usr/local"]).map { $0.lowercased() }
         self.cloudPrefixes = [home + "/Library/Mobile Documents", home + "/Library/CloudStorage"].map { $0.lowercased() }
-        var itemGuards = [home.lowercased()]
-        var contentGuards = [home.lowercased()]
-        for location in knowledge.locations {
-            let literal = location.paths
+        var guards = [home.lowercased()]
+        for location in knowledge.locations where location.isEssential {
+            guards += location.paths
                 .map { KnowledgeBase.expand($0, home: home) }
                 .filter { !$0.contains("*") }
                 .map { $0.lowercased() }
-            if location.cleanup != .trashItem {
-                itemGuards += literal
-            }
-            switch location.cleanup {
-            case .individually, .manual:
-                contentGuards += literal
-            case .trashItem, .trashContents:
-                if location.safety == .protected { contentGuards += literal }
-            }
         }
-        self.itemGuards = itemGuards
-        self.contentGuards = contentGuards
+        self.guardedFolders = guards
     }
 
     public static func defaultProtectedPrefixes(home: String) -> [String] {
@@ -106,8 +98,7 @@ public struct SafetyPolicy: Sendable {
 
         if !partOfClearing {
             let ancestorGuard = lowered + "/"
-            let guards = kind == .item ? itemGuards : contentGuards
-            if let guarded = guards.first(where: { $0.hasPrefix(ancestorGuard) }) {
+            if let guarded = guardedFolders.first(where: { $0.hasPrefix(ancestorGuard) }) {
                 let inner = (guarded as NSString).lastPathComponent
                 return .blocked("This folder contains folders that apps or macOS rely on (such as \"\(inner)\"). Delete specific items inside it instead.")
             }
@@ -139,6 +130,9 @@ public struct SafetyPolicy: Sendable {
         if kind == .contents {
             return .blocked("Emptying this whole folder isn't supported. Choose individual items inside it instead.")
         }
+        if location.cleanup == .individually || location.cleanup == .trashItem, Self.isProgramFile(path) {
+            return .blocked("This is part of an installed program or tool. Deleting it on its own would break that program. Remove the whole program (or use its uninstaller) instead.")
+        }
         if (location.insideSafety ?? location.safety) == .protected {
             return .blocked(blockedReason(for: location))
         }
@@ -146,6 +140,21 @@ public struct SafetyPolicy: Sendable {
             return .blocked("This is part of \(location.title), which shouldn't be edited directly. \(steps)")
         }
         return .allowed
+    }
+
+    /// Libraries and other pieces of installed software: removing one breaks the whole program.
+    static let programExtensions: Set<String> = ["dylib", "so", "a", "o", "jar", "node", "dll", "exe", "pyd", "wasm"]
+
+    /// True for code libraries and for executable files without an extension.
+    static func isProgramFile(_ path: String) -> Bool {
+        let ext = (path as NSString).pathExtension.lowercased()
+        if programExtensions.contains(ext) { return true }
+        guard ext.isEmpty else { return false }
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return false }
+        let mode = UInt32(info.st_mode)
+        let isRegularFile = mode & 0o170000 == 0o100000
+        return isRegularFile && mode & 0o111 != 0
     }
 
     private func blockedReason(for location: KnownLocation) -> String {

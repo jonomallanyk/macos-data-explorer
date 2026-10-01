@@ -80,12 +80,31 @@ final class SafetyPolicyTests: XCTestCase {
     }
 
     func testChildrenOfClearedFolders() {
-        // Deleting this folder by itself would remove a folder that has its own entry...
-        assertBlocked(home + "/.cache/lm-studio")
-        // ...but it's fine as part of clearing ~/.cache.
+        // A folder that contains an essential one can't be deleted by itself...
+        assertBlocked(home + "/Library/Containers/com.docker.docker")
+        // ...but clearing a cache folder may remove anything directly inside it.
         XCTAssertTrue(policy.check(home + "/.cache/lm-studio", kind: .item, partOfClearing: true).isAllowed)
         // Protected things stay protected even then.
         XCTAssertFalse(policy.check("/private/var/vm/swapfile0", kind: .item, partOfClearing: true).isAllowed)
+    }
+
+    func testDeveloperToolFoldersCanBeRemovedWhole() {
+        assertAllowed(home + "/Library/Android")
+        assertAllowed(home + "/Library/Android/sdk")
+        assertAllowed(home + "/Library/Android/sdk/ndk/27.3.13750724")
+        assertAllowed(home + "/.cache/lm-studio")
+        assertAllowed(home + "/.gradle")
+        // Xcode's folder holds your settings, so it stays.
+        assertBlocked(home + "/Library/Developer/Xcode/UserData")
+    }
+
+    func testPiecesOfProgramsAreBlocked() {
+        assertBlocked(home + "/Library/Android/sdk/ndk/27/toolchains/llvm/lib/libclang.dylib")
+        assertBlocked("/usr/local/lib/libssl.dylib")
+        assertBlocked(home + "/tools/runtime/lib/core.jar")
+        // Anything goes inside folders that are meant to be emptied.
+        assertAllowed(home + "/Library/Caches/com.example/plugin.dylib")
+        assertAllowed(home + "/Library/Developer/Xcode/DerivedData/App-abcdefghijklmnopqrstuvwxyzab/Build/x.o")
     }
 
     func testOrdinaryFiles() {

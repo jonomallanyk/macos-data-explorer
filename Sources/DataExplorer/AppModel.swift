@@ -318,7 +318,7 @@ final class AppModel {
         let path = path(of: node)
         guard policy.check(path, kind: .item).isAllowed else { return nil }
         let explanation = knowledge.explain(path: path, isDirectory: node.isDirectory)
-        return CleanupTarget(path: path, kind: .item, title: node.name, size: node.size, safety: explanation.safety)
+        return CleanupTarget(path: path, kind: .item, title: node.name, size: node.size, safety: explanation.safety, isFolder: node.isDirectory)
     }
 
     // MARK: - Navigation

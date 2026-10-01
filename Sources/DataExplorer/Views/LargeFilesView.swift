@@ -35,7 +35,7 @@ struct LargeFilesView: View {
                 Spacer()
                 Toggle("Hide files that can't be deleted here", isOn: $hideProtected)
                     .toggleStyle(.checkbox)
-                Button("Add \(selectedTargets.count) to Cleanup List") {
+                Button(selectedTargets.isEmpty ? "Add to Cleanup List" : "Add \(selectedTargets.count) to Cleanup List") {
                     for target in selectedTargets where !model.isSelected(target) {
                         model.toggle(target)
                     }

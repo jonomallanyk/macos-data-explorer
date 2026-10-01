@@ -63,6 +63,22 @@ public struct KnownLocation: Identifiable, Sendable {
         if case .manual(let steps) = cleanup { return steps }
         return nil
     }
+
+    /// Folders that macOS or apps expect to exist, or that hold data managed elsewhere. Neither
+    /// they nor any folder containing them can be deleted as a whole. Tool and developer
+    /// folders that can simply be re-downloaded (like an Android SDK) aren't essential.
+    public var isEssential: Bool {
+        if cleanup == .trashItem { return false }
+        if safety == .protected || safety == .caution { return true }
+        if case .manual = cleanup { return true }
+        switch category {
+        case .caches, .logs, .trash, .systemManaged, .appData, .mailAndMessages, .cloudFiles,
+             .mediaLibraries, .deviceBackups, .personalFiles:
+            return true
+        case .apps, .developer, .virtualMachines, .other:
+            return false
+        }
+    }
 }
 
 /// A plain-language description of a path.

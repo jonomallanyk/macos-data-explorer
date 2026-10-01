@@ -112,6 +112,19 @@ final class AnalyzerTests: XCTestCase {
         XCTAssertEqual(outcome.bytesHandled, 3_000_000 + 4_000_000 + 1)
     }
 
+    func testExecutablesAreTreatedAsPartsOfPrograms() throws {
+        let box = try Sandbox()
+        let tool = try box.file("tools/bin/mytool", bytes: 10)
+        let notes = try box.file("tools/notes", bytes: 10)
+        chmod(tool, 0o755)
+        chmod(notes, 0o644)
+        let knowledge = KnowledgeBase.standard(home: box.root)
+        let policy = makePolicy(knowledge)
+        XCTAssertFalse(policy.check(tool, kind: .item).isAllowed)
+        XCTAssertTrue(policy.check(notes, kind: .item).isAllowed)
+        XCTAssertTrue(policy.check(box.root + "/tools", kind: .item).isAllowed, "The whole tool can still go")
+    }
+
     func testTrashModeUsesRemover() throws {
         final class RecordingRemover: FileRemoving, @unchecked Sendable {
             var trashed: [String] = []

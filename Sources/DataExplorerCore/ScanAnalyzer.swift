@@ -213,7 +213,7 @@ public struct ScanAnalyzer: Sendable {
         let explanation = knowledge.explain(path: path, isDirectory: node.isDirectory)
         let verdict = policy.check(path, kind: kind)
         let target = verdict.isAllowed
-            ? CleanupTarget(path: path, kind: kind, title: name, size: node.size, safety: explanation.safety)
+            ? CleanupTarget(path: path, kind: kind, title: name, size: node.size, safety: explanation.safety, isFolder: node.isDirectory)
             : nil
         return FoundItem(
             path: path,
@@ -357,7 +357,9 @@ public struct ScanAnalyzer: Sendable {
         let parentMarkers = node.parent?.markers ?? []
         switch node.name {
         case "node_modules":
-            return "Node.js packages"
+            // Without a package.json next to it, this is probably a tool's own install
+            // (such as Node's global lib/node_modules), not a project's dependencies.
+            return parentMarkers.contains(.packageJSON) ? "Node.js packages" : nil
         case ".venv", "venv", "env", ".env":
             return node.markers.contains(.pyvenvCfg) ? "Python virtual environment" : nil
         case "target":
