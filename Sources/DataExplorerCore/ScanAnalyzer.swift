@@ -260,6 +260,9 @@ public struct ScanAnalyzer: Sendable {
     }
 
     private func displayName(for location: KnownLocation, path: String, node: FileNode) -> String {
+        if let friendly = ItemDetails.friendlyName(locationID: location.id, name: node.name) {
+            return friendly
+        }
         let match = knowledge.match(path: path)
         if let captures = match?.captures, !captures.isEmpty, match?.location.id == location.id {
             return captures.joined(separator: " › ")

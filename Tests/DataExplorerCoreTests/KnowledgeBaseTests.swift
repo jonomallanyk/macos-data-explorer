@@ -91,6 +91,12 @@ final class KnowledgeBaseTests: XCTestCase {
         XCTAssertEqual(cachedImage.safety, .safe)
     }
 
+    func testFriendlyRuntimeAssetNames() {
+        XCTAssertEqual(ItemDetails.friendlyName(locationID: "simulator-runtime-assets", name: "com_apple_MobileAsset_xrOSSimulatorRuntime"), "visionOS simulator runtimes")
+        XCTAssertEqual(ItemDetails.friendlyName(locationID: "simulator-runtime-assets", name: "com_apple_MobileAsset_iOSSimulatorRuntime"), "iOS simulator runtimes")
+        XCTAssertNil(ItemDetails.friendlyName(locationID: "caches", name: "anything"))
+    }
+
     func testRuntimeNames() {
         XCTAssertEqual(ItemDetails.runtimeName("com.apple.CoreSimulator.SimRuntime.iOS-17-2"), "iOS 17.2")
         XCTAssertEqual(ItemDetails.runtimeName("com.apple.CoreSimulator.SimRuntime.xrOS-1-0"), "visionOS 1.0")

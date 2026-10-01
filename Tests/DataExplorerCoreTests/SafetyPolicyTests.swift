@@ -140,6 +140,14 @@ final class SafetyPolicyTests: XCTestCase {
         assertAllowed(home + "/Library/Application Support/Slack/Cache", .contents)
     }
 
+    func testPiecesOfRepositoriesAndRuntimesAreBlocked() {
+        assertBlocked("/usr/local/share/vcpkg/.git/objects/pack/pack-1234.pack")
+        assertBlocked(home + "/Projects/app/.git/objects/pack/pack-1234.pack")
+        assertAllowed(home + "/Projects/app/.git")
+        assertBlocked(home + "/tools/Java_Temurin/25/arm64/Contents/Home/lib/modules")
+        assertAllowed(home + "/tools/Java_Temurin/25")
+    }
+
     func testBundleIDFoldersAreNotPackages() {
         assertAllowed(home + "/Library/Containers/com.utmapp.UTM/Data/Documents", .contents)
         assertAllowed(home + "/Library/Containers/com.apple.iWork.Pages/Data/Library/Caches", .contents)

@@ -173,12 +173,17 @@ public struct CleanupEngine: Sendable {
         let path = target.path
         let parent = (path as NSString).deletingLastPathComponent
         if let resolved = realpath(parent, nil) {
-            let real = String(cString: resolved)
+            let realPath = String(cString: resolved)
+            let real = realPath.lowercased()
             free(resolved)
-            let matches = real.lowercased() == parent.lowercased()
-                || real.lowercased() == (FileTree.dataVolumePath + parent).lowercased()
+            // macOS's own fixed links (/var, /tmp and /etc point into /private) and the Data
+            // volume's firmlinks lead to the same place, so they're fine.
+            let expected = parent.lowercased()
+            let matches = real == expected
+                || real == "/private" + expected
+                || real == (FileTree.dataVolumePath + parent).lowercased()
             if !matches {
-                return "This path goes through a shortcut (symbolic link) to \(real), so Data Explorer won't delete it. Find the item at its real location instead."
+                return "This path goes through a shortcut (symbolic link) to \(realPath), so Data Explorer won't delete it. Find the item at its real location instead."
             }
         }
 

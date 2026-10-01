@@ -140,8 +140,13 @@ public struct SafetyPolicy: Sendable {
         if kind == .contents {
             return .blocked("Emptying this whole folder isn't supported. Choose individual items inside it instead.")
         }
-        if location.cleanup == .individually || location.cleanup == .trashItem, Self.isProgramFile(path) {
-            return .blocked("This is part of an installed program or tool. Deleting it on its own would break that program. Remove the whole program (or use its uninstaller) instead.")
+        if location.cleanup == .individually || location.cleanup == .trashItem {
+            if names.dropLast().contains(where: { Self.repositoryFolderNames.contains($0) }) {
+                return .blocked("This is part of a version-control repository's history. Deleting pieces of it corrupts the repository; delete the whole project folder instead.")
+            }
+            if Self.isProgramFile(path) || Self.bundleInteriorMarkers.contains(where: { path.contains($0) }) {
+                return .blocked("This is part of an installed program or tool. Deleting it on its own would break that program. Remove the whole program (or use its uninstaller) instead.")
+            }
         }
         if (location.insideSafety ?? location.safety) == .protected {
             return .blocked(blockedReason(for: location))
@@ -188,6 +193,12 @@ public struct SafetyPolicy: Sendable {
         }
         return false
     }
+
+    static let repositoryFolderNames: Set<String> = [".git", ".svn", ".hg"]
+
+    /// Folder layouts used inside app and runtime bundles, even ones without a bundle extension
+    /// (such as a Java runtime's Contents/Home).
+    static let bundleInteriorMarkers = ["/Contents/MacOS/", "/Contents/Home/", "/Contents/Frameworks/", "/Contents/Resources/"]
 
     /// Libraries and other pieces of installed software: removing one breaks the whole program.
     static let programExtensions: Set<String> = ["dylib", "so", "a", "o", "jar", "node", "dll", "exe", "pyd", "wasm"]

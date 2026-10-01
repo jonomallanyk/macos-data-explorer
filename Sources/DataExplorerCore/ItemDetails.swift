@@ -80,6 +80,24 @@ enum ItemDetails {
         )
     }
 
+    /// A readable name for a matched folder, when its real name is cryptic.
+    static func friendlyName(locationID: String, name: String) -> String? {
+        switch locationID {
+        case "simulator-runtime-assets":
+            // "com_apple_MobileAsset_xrOSSimulatorRuntime" → "visionOS simulator runtimes"
+            var platform = name.replacingOccurrences(of: "com_apple_MobileAsset_", with: "")
+                .replacingOccurrences(of: "SimulatorRuntime", with: "")
+            switch platform {
+            case "xrOS": platform = "visionOS"
+            case "appleTVOS": platform = "tvOS"
+            default: break
+            }
+            return platform.isEmpty ? nil : "\(platform) simulator runtimes"
+        default:
+            return nil
+        }
+    }
+
     /// Turns "com.example.MyApp" into something friendlier when there's no better name.
     static func looksLikeBundleID(_ name: String) -> Bool {
         let parts = name.split(separator: ".")
