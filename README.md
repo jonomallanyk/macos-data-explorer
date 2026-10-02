@@ -64,11 +64,16 @@ You need macOS 14 Sonoma or later.
 
 ### Or download a build
 
-Every push builds the app on GitHub Actions. Open the latest successful
-[Build & test run](https://github.com/jonomallanyk/macos-data-explorer/actions/workflows/build.yml),
-download the **Data-Explorer-app** artifact, and unzip it. The app isn't notarised by Apple,
-so the first time, right-click it and choose **Open** (or run
-`xattr -dr com.apple.quarantine "Data Explorer.app"`).
+Every push builds the app on GitHub Actions. While signed in to GitHub, open the latest
+successful [Build & test run](https://github.com/jonomallanyk/macos-data-explorer/actions/workflows/build.yml),
+scroll to **Artifacts** at the bottom and download **Data-Explorer-app**. Double-click the
+download to unzip it, then double-click the `Data-Explorer.zip` inside it to get
+**Data Explorer.app**.
+
+The app isn't notarised by Apple, so macOS blocks it the first time you open it. Click
+**Done**, open **System Settings › Privacy & Security**, scroll down and click **Open Anyway**
+next to the message about Data Explorer. (Or run
+`xattr -dr com.apple.quarantine "Data Explorer.app"` in Terminal before opening it.)
 
 ### Give it Full Disk Access
 
